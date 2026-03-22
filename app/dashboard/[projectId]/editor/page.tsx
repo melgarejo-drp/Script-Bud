@@ -5,20 +5,13 @@ import {
 } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import Editor, { useMonaco } from "@monaco-editor/react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useTheme } from "next-themes";
+import { useScript } from "@/lib/use-script";
 import * as pdfMake from "pdfmake/build/pdfmake";
 import * as pdfFonts from "pdfmake/build/vfs_fonts";
-import {
-  ColumnsIcon, FileTextIcon, EyeIcon, ChevronDownIcon,
-} from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-type ViewMode = "editor" | "split" | "preview";
-
-// ─── Fountain Parser ───────────────────────────────────────────────
-// Token types matching real screenplay conventions
 type FountainTokenType =
   | "title-page"
   | "scene-heading"
@@ -37,6 +30,12 @@ interface FountainToken {
   type: FountainTokenType;
   text: string;
   raw: string;
+}
+
+interface Block {
+  id: string;
+  rawText: string[];
+  tokens: FountainToken[];
 }
 
 function parseFountain(text: string): FountainToken[] {
@@ -211,19 +210,242 @@ function renderInline(text: string): string {
     .replace(/^\/\*/, "<span class='underline'>").replace(/\*\/$/, "</span>");
 }
 
-// ─── Live Preview Component ─────────────────────────────────────────
-function FountainPreview({ text, isDark }: { text: string; isDark: boolean }) {
-  const tokens = useMemo(() => parseFountain(text), [text]);
-  const previewRef = useRef<HTMLDivElement>(null);
+// ── Block management ──
+function textToBlocks(text: string): Block[] {
+  const lines = text.split("\n");
+  const blocks: Block[] = [];
+  let currentBlock: string[] = [];
+  let blockCounter = 0;
 
-  const bg = isDark ? "#0f0f10" : "#ffffff";
-  const paper = isDark ? "#141416" : "#ffffff";
+  for (const line of lines) {
+    if (line.trim() === "") {
+      if (currentBlock.length > 0) {
+        const blockText = currentBlock.join("\n");
+        blocks.push({
+          id: `block-${blockCounter}`,
+          rawText: currentBlock,
+          tokens: parseFountain(blockText),
+        });
+        blockCounter++;
+        currentBlock = [];
+      }
+      // Add blank block
+      blocks.push({
+        id: `block-${blockCounter}`,
+        rawText: [""],
+        tokens: [{ type: "blank", text: "", raw: "" }],
+      });
+      blockCounter++;
+    } else {
+      currentBlock.push(line);
+    }
+  }
+
+  if (currentBlock.length > 0) {
+    const blockText = currentBlock.join("\n");
+    blocks.push({
+      id: `block-${blockCounter}`,
+      rawText: currentBlock,
+      tokens: parseFountain(blockText),
+    });
+  }
+
+  return blocks;
+}
+
+function blocksToText(blocks: Block[]): string {
+  return blocks.map((b) => b.rawText.join("\n")).join("\n");
+}
+
+// ── Token View Component ──
+function TokenView({ token, isDark }: { token: FountainToken; isDark: boolean }) {
   const fg = isDark ? "#e8e8e8" : "#1a1a1a";
   const muted = isDark ? "#5a5a6a" : "#888";
   const sceneColor = isDark ? "#60a5fa" : "#1d4ed8";
   const charColor = isDark ? "#34d399" : "#065f46";
   const transColor = isDark ? "#a78bfa" : "#6d28d9";
   const noteColor = isDark ? "#6b7280" : "#9ca3af";
+
+  const html = renderInline(token.text);
+
+  switch (token.type) {
+    case "title-page":
+      return (
+        <div style={{ color: muted, fontSize: "11px", marginBottom: "2px" }}>
+          {token.text}
+        </div>
+      );
+
+    case "blank":
+      return <div style={{ height: "13px" }} />;
+
+    case "page-break":
+      return (
+        <div style={{ borderTop: `1px dashed ${muted}`, margin: "24px 0", opacity: 0.4 }} />
+      );
+
+    case "scene-heading":
+      return (
+        <div
+          style={{
+            color: sceneColor,
+            fontWeight: "bold",
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            marginTop: "8px",
+            marginBottom: "2px",
+          }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+
+    case "action":
+      return (
+        <div style={{ marginBottom: "2px", color: fg }} dangerouslySetInnerHTML={{ __html: html }} />
+      );
+
+    case "character":
+      return (
+        <div
+          style={{
+            color: charColor,
+            fontWeight: "bold",
+            textTransform: "uppercase",
+            marginLeft: "42%",
+            marginTop: "8px",
+            marginBottom: "2px",
+            letterSpacing: "0.04em",
+            whiteSpace: "nowrap",
+          }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+
+    case "parenthetical":
+      return (
+        <div
+          style={{
+            color: muted,
+            fontStyle: "italic",
+            marginLeft: "35%",
+            marginRight: "20%",
+            marginBottom: "2px",
+          }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+
+    case "dialogue":
+      return (
+        <div
+          style={{
+            marginLeft: "24%",
+            marginRight: "16%",
+            marginBottom: "2px",
+            color: fg,
+          }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+
+    case "transition":
+      return (
+        <div
+          style={{
+            color: transColor,
+            textAlign: "right",
+            fontWeight: "bold",
+            textTransform: "uppercase",
+            marginTop: "8px",
+            marginBottom: "2px",
+            letterSpacing: "0.03em",
+          }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+
+    case "centered":
+      return (
+        <div style={{ textAlign: "center", color: fg, marginBottom: "2px" }} dangerouslySetInnerHTML={{ __html: html }} />
+      );
+
+    case "lyric":
+      return (
+        <div style={{ fontStyle: "italic", color: fg, marginBottom: "2px" }} dangerouslySetInnerHTML={{ __html: html }} />
+      );
+
+    case "note":
+      return (
+        <div
+          style={{
+            color: noteColor,
+            fontSize: "11px",
+            fontStyle: "italic",
+            borderLeft: `2px solid ${noteColor}`,
+            paddingLeft: "8px",
+            marginBottom: "4px",
+            opacity: 0.7,
+          }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
+
+    default:
+      return null;
+  }
+}
+
+// ─── Live Preview Component with Inline Editing ─────────────────────────
+function FountainEditor({
+  blocks,
+  onBlockChange,
+  isDark,
+}: {
+  blocks: Block[];
+  onBlockChange: (blocks: Block[]) => void;
+  isDark: boolean;
+}) {
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  const bg = isDark ? "#0f0f10" : "#ffffff";
+  const paper = isDark ? "#141416" : "#ffffff";
+  const fg = isDark ? "#e8e8e8" : "#1a1a1a";
+
+  const handleBlockClick = (block: Block) => {
+    setEditingBlockId(block.id);
+    setEditingText(block.rawText.join("\n"));
+  };
+
+  const handleBlockBlur = () => {
+    if (editingBlockId) {
+      const updated = blocks.map((b) => {
+        if (b.id === editingBlockId) {
+          const newRawText = editingText.split("\n");
+          return {
+            ...b,
+            rawText: newRawText,
+            tokens: parseFountain(editingText),
+          };
+        }
+        return b;
+      });
+      onBlockChange(updated);
+      setEditingBlockId(null);
+      setEditingText("");
+    }
+  };
+
+  const handleInsertBlock = (index: number) => {
+    const newBlocks = [...blocks];
+    newBlocks.splice(index, 0, {
+      id: `block-${Date.now()}`,
+      rawText: [""],
+      tokens: [{ type: "blank", text: "", raw: "" }],
+    });
+    onBlockChange(newBlocks);
+  };
 
   return (
     <div
@@ -245,159 +467,74 @@ function FountainPreview({ text, isDark }: { text: string; isDark: boolean }) {
           background: paper,
           maxWidth: "680px",
           margin: "0 auto",
-          padding: "80px 80px 100px 96px", // screenplay standard margins
+          padding: "80px 80px 100px 96px",
           minHeight: "960px",
           boxShadow: isDark ? "0 0 0 1px #2a2a2e" : "0 1px 3px rgba(0,0,0,0.1), 0 0 0 1px #e5e5e5",
           borderRadius: "2px",
+          cursor: "text",
         }}
       >
-        {tokens.map((token, idx) => {
-          const html = renderInline(token.text);
-
-          switch (token.type) {
-            case "title-page":
-              return (
-                <div key={idx} style={{ color: muted, fontSize: "11px", marginBottom: "2px" }}>
-                  {token.text}
-                </div>
-              );
-
-            case "blank":
-              return <div key={idx} style={{ height: "13px" }} />;
-
-            case "page-break":
-              return (
-                <div key={idx} style={{ borderTop: `1px dashed ${muted}`, margin: "24px 0", opacity: 0.4 }} />
-              );
-
-            case "scene-heading":
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    color: sceneColor,
-                    fontWeight: "bold",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.03em",
-                    marginTop: "8px",
-                    marginBottom: "2px",
+        {blocks.map((block, idx) => (
+          <div key={block.id}>
+            <div
+              onClick={() => handleBlockClick(block)}
+              style={{ position: "relative", minHeight: "20px" }}
+              className={`group transition-colors rounded px-1 ${
+                editingBlockId === block.id ? "bg-blue-500/10" : "hover:bg-muted/50"
+              }`}
+            >
+              {editingBlockId === block.id ? (
+                <textarea
+                  autoFocus
+                  value={editingText}
+                  onChange={(e) => setEditingText(e.target.value)}
+                  onBlur={handleBlockBlur}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setEditingBlockId(null);
+                      setEditingText("");
+                    }
                   }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            case "action":
-              return (
-                <div
-                  key={idx}
-                  style={{ marginBottom: "2px", color: fg }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            case "character":
-              return (
-                <div
-                  key={idx}
                   style={{
-                    color: charColor,
-                    fontWeight: "bold",
-                    textTransform: "uppercase",
-                    marginLeft: "42%",
-                    marginTop: "8px",
-                    marginBottom: "2px",
-                    letterSpacing: "0.04em",
-                    whiteSpace: "nowrap",
-                  }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            case "parenthetical":
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    color: muted,
-                    fontStyle: "italic",
-                    marginLeft: "35%",
-                    marginRight: "20%",
-                    marginBottom: "2px",
-                  }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            case "dialogue":
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    marginLeft: "24%",
-                    marginRight: "16%",
-                    marginBottom: "2px",
+                    fontFamily: "inherit",
+                    fontSize: "13px",
+                    lineHeight: "1.6",
                     color: fg,
+                    background: isDark ? "#09090b" : "#f9fafb",
+                    border: `2px solid ${isDark ? "#3a3a3f" : "#e5e5e5"}`,
+                    padding: "8px",
+                    borderRadius: "4px",
+                    width: "100%",
+                    minHeight: "60px",
+                    resize: "none",
                   }}
-                  dangerouslySetInnerHTML={{ __html: html }}
                 />
-              );
+              ) : (
+                <div className="opacity-0 group-hover:opacity-100 absolute right-2 top-0 text-[10px] text-muted-foreground font-semibold uppercase tracking-widest pointer-events-none">
+                  Click to edit
+                </div>
+              )}
+            </div>
 
-            case "transition":
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    color: transColor,
-                    textAlign: "right",
-                    fontWeight: "bold",
-                    textTransform: "uppercase",
-                    marginTop: "8px",
-                    marginBottom: "2px",
-                    letterSpacing: "0.03em",
-                  }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
+            {editingBlockId !== block.id && (
+              <div>
+                {block.tokens.map((token, tokenIdx) => (
+                  <TokenView key={tokenIdx} token={token} isDark={isDark} />
+                ))}
+              </div>
+            )}
 
-            case "centered":
-              return (
-                <div
-                  key={idx}
-                  style={{ textAlign: "center", color: fg, marginBottom: "2px" }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            case "lyric":
-              return (
-                <div
-                  key={idx}
-                  style={{ fontStyle: "italic", color: fg, marginBottom: "2px" }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            case "note":
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    color: noteColor,
-                    fontSize: "11px",
-                    fontStyle: "italic",
-                    borderLeft: `2px solid ${noteColor}`,
-                    paddingLeft: "8px",
-                    marginBottom: "4px",
-                    opacity: 0.7,
-                  }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
-              );
-
-            default:
-              return null;
-          }
-        })}
+            {/* Insert block button */}
+            {!editingBlockId && (
+              <button
+                onClick={() => handleInsertBlock(idx + 1)}
+                className="mx-auto block my-1 text-[10px] text-muted-foreground hover:text-foreground font-semibold uppercase tracking-widest px-3 py-1 rounded hover:bg-muted/50 transition-colors opacity-0 group-hover:opacity-100"
+              >
+                + Bloque
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -441,29 +578,31 @@ Una pantalla muestra el audio como onda. Alguien está escuchando.
 export default function EditorPage() {
   const params = useParams();
   const projectId = params?.projectId as string;
-  const monaco = useMonaco();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const [mounted, setMounted] = useState(false);
 
-  const [scriptText, setScriptText] = useState(EXAMPLE_SCRIPT);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [transcription, setTranscription] = useState("");
-  const [showTranscriptionPanel, setShowTranscriptionPanel] = useState(false);
+  const { text: scriptText, save: saveScript, loaded } = useScript(projectId, EXAMPLE_SCRIPT);
+  const [blocks, setBlocks] = useState<Block[]>([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState<any>(null);
   const [isFeedbackLoading, setIsFeedbackLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [transcription, setTranscription] = useState("");
+  const [showTranscriptionPanel, setShowTranscriptionPanel] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
-  const lastSaved = useRef<string>(scriptText);
-  const saveTimeout = useRef<NodeJS.Timeout | null>(null);
-  const editorRef = useRef<any>(null);
-
-  // Hydration guard — prevents theme flash on initial load
+  // Hydration guard
   useEffect(() => { setMounted(true); }, []);
+
+  // Initialize blocks from text
+  useEffect(() => {
+    if (loaded) {
+      setBlocks(textToBlocks(scriptText));
+    }
+  }, [scriptText, loaded]);
 
   // Close export menu on outside click
   useEffect(() => {
@@ -476,123 +615,23 @@ export default function EditorPage() {
     return () => document.removeEventListener("pointerdown", handler);
   }, []);
 
-  useEffect(() => {
-    if (!monaco) return;
-
-    monaco.languages.register({ id: "fountain" });
-    monaco.languages.setMonarchTokensProvider("fountain", {
-      tokenizer: {
-        root: [
-          [/^(INT\.|EXT\.|EST\.|I\/E\.|INT\/EXT\.).*$/, "scene-heading"],
-          [/^[A-Z\s]+(TO:)$/, "transition"],
-          [/^FADE (OUT\.?|IN\.|TO BLACK\.?)$/i, "transition"],
-          [/^[A-Z][A-Z0-9\s'\.\-\/]+(\s*\([^)]*\))?[\s]*$/, "character"],
-          [/^[\s]*\([^)]+\)[\s]*$/, "parenthetical"],
-          [/^(Title|Credit|Author|Draft Date|Contact|Source):\s*(.*)$/i, "metadata"],
-          [/^={3,}$/, "page-break"],
-          [/^>.*<\s*$/, "centered"],
-          [/\*\*\*(.+?)\*\*\*/, "bold-italic"],
-          [/\*\*(.+?)\*\*/, "bold"],
-          [/\*(.+?)\*/, "italic"],
-          [/^~.*$/, "lyric"],
-          [/^\[\[.*\]\]$/, "note"],
-        ]
-      }
-    });
-
-    monaco.editor.defineTheme("fountain-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [
-        { token: "scene-heading", foreground: "60A5FA", fontStyle: "bold" },
-        { token: "transition", foreground: "A78BFA", fontStyle: "bold" },
-        { token: "character", foreground: "34D399", fontStyle: "bold" },
-        { token: "parenthetical", foreground: "9CA3AF", fontStyle: "italic" },
-        { token: "metadata", foreground: "6B7280" },
-        { token: "page-break", foreground: "374151", fontStyle: "bold" },
-        { token: "centered", foreground: "E8E8E8", fontStyle: "italic" },
-        { token: "bold-italic", foreground: "F9FAFB", fontStyle: "bold italic" },
-        { token: "bold", foreground: "F9FAFB", fontStyle: "bold" },
-        { token: "italic", foreground: "F9FAFB", fontStyle: "italic" },
-        { token: "lyric", foreground: "FCD34D", fontStyle: "italic" },
-        { token: "note", foreground: "4B5563", fontStyle: "italic" },
-      ],
-      colors: {
-        "editor.background": "#09090b",
-        "editor.lineHighlightBackground": "#18181b",
-        "editorLineNumber.foreground": "#374151",
-        "editorLineNumber.activeForeground": "#6B7280",
-      }
-    });
-
-    monaco.editor.defineTheme("fountain-light", {
-      base: "vs",
-      inherit: true,
-      rules: [
-        { token: "scene-heading", foreground: "1D4ED8", fontStyle: "bold" },
-        { token: "transition", foreground: "6D28D9", fontStyle: "bold" },
-        { token: "character", foreground: "065F46", fontStyle: "bold" },
-        { token: "parenthetical", foreground: "6B7280", fontStyle: "italic" },
-        { token: "metadata", foreground: "9CA3AF" },
-        { token: "page-break", foreground: "D1D5DB" },
-        { token: "centered", foreground: "374151", fontStyle: "italic" },
-        { token: "bold", foreground: "111827", fontStyle: "bold" },
-        { token: "italic", foreground: "374151", fontStyle: "italic" },
-        { token: "lyric", foreground: "D97706", fontStyle: "italic" },
-        { token: "note", foreground: "9CA3AF", fontStyle: "italic" },
-      ],
-      colors: {
-        "editor.background": "#ffffff",
-        "editor.lineHighlightBackground": "#f9fafb",
-        "editorLineNumber.foreground": "#D1D5DB",
-        "editorLineNumber.activeForeground": "#9CA3AF",
-      }
-    });
-  }, [monaco]);
-
-  // Use "vs-dark" as safe default until hydration resolves, avoiding theme flash
-  const monacoTheme = !mounted ? "vs-dark" : (isDark ? "fountain-dark" : "fountain-light");
-
-  const handleEditorDidMount = (editor: any) => {
-    editorRef.current = editor;
-  };
+  const handleBlockChange = useCallback(
+    (updatedBlocks: Block[]) => {
+      setBlocks(updatedBlocks);
+      const newText = blocksToText(updatedBlocks);
+      saveScript(newText);
+    },
+    [saveScript]
+  );
 
   const words = scriptText.split(/\s+/).filter(Boolean).length;
   const pages = Math.max(1, Math.round(words / 175));
-  const minutes = pages;
   const sluglines = (scriptText.match(/^(INT\.|EXT\.|EST\.|I\/E\.)/gm) || []).length;
-
-  const handleChange = useCallback(
-    (value: string | undefined) => {
-      const text = value || "";
-      setScriptText(text);
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-      if (text === lastSaved.current) return;
-      setSaveState("saving");
-      saveTimeout.current = setTimeout(async () => {
-        try {
-          await fetch("/api/notion/projects", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "sync", projectId, content: text,
-              metadata: { lastModified: new Date().toISOString() },
-            }),
-          });
-          lastSaved.current = text;
-          setSaveState("saved");
-          setTimeout(() => setSaveState("idle"), 3000);
-        } catch {
-          setSaveState("error");
-        }
-      }, 1500);
-    },
-    [projectId]
-  );
 
   async function handleGenerate() {
     if (!transcription.trim()) return;
     setIsGenerating(true);
+    setGenerateError(null);
     setShowTranscriptionPanel(false);
     try {
       const res = await fetch("/api/guion/generate", {
@@ -600,13 +639,20 @@ export default function EditorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, transcription, duration: 10, genre: "Drama", title: "Mi Guion" }),
       });
+
+      if (!res.ok) {
+        const err = await res.text();
+        setGenerateError(`Error: ${res.status} - ${err}`);
+        setIsGenerating(false);
+        return;
+      }
+
       const data = await res.json();
       if (data.guionText) {
-        setScriptText(data.guionText);
-        handleChange(data.guionText);
+        saveScript(data.guionText);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setGenerateError(err?.message || "Error generating script");
     } finally {
       setIsGenerating(false);
     }
@@ -621,10 +667,18 @@ export default function EditorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ guionText: scriptText, projectId }),
       });
+
+      if (!res.ok) {
+        const err = await res.text();
+        setFeedback({ error: `Error: ${res.status} - ${err}` });
+        setIsFeedbackLoading(false);
+        return;
+      }
+
       const data = await res.json();
       setFeedback(data);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setFeedback({ error: err?.message || "Error evaluating script" });
     } finally {
       setIsFeedbackLoading(false);
     }
@@ -660,9 +714,6 @@ export default function EditorPage() {
         };
       } catch (e) { console.warn("pdfmake font config:", e); }
 
-      // Parse fountain tokens → proper screenplay PDF blocks
-      // Page layout: Letter 8.5×11", margins: 1.5" left, 1" top/right/bottom
-      // In pdfmake points (72pt = 1"): left=108, top=72, right=72, bottom=72
       const pdfTokens = parseFountain(scriptText);
       const pdfContent: any[] = [];
 
@@ -694,21 +745,21 @@ export default function EditorPage() {
             pdfContent.push({
               text: token.text.toUpperCase(),
               font: "Courier", fontSize: 12, bold: true,
-              margin: [216, 12, 0, 0], // ~3" from content left ≈ character position
+              margin: [216, 12, 0, 0],
             });
             break;
           case "parenthetical":
             pdfContent.push({
               text: token.text,
               font: "Courier", fontSize: 12, italics: true,
-              margin: [162, 0, 108, 0], // slightly narrower than dialogue
+              margin: [162, 0, 108, 0],
             });
             break;
           case "dialogue":
             pdfContent.push({
               text: token.text,
               font: "Courier", fontSize: 12,
-              margin: [108, 0, 108, 0], // ~1.5" indent each side within content
+              margin: [108, 0, 108, 0],
             });
             break;
           case "transition":
@@ -730,7 +781,7 @@ export default function EditorPage() {
             break;
           case "title-page":
           case "note":
-            break; // skip in body
+            break;
         }
       }
 
@@ -743,48 +794,47 @@ export default function EditorPage() {
       pdfMake.createPdf(docDefinition as any).download("guion.pdf");
       return;
     }
-    const res = await fetch("/api/guion/export", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ guionText: scriptText, format, title: "mi_guion" }),
-    });
-    if (format === "fountain" || format === "markdown") {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `guion.${format === "fountain" ? "fountain" : "md"}`;
-      a.click();
+
+    try {
+      const res = await fetch("/api/guion/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guionText: scriptText, format, title: "mi_guion" }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `guion.${format === "fountain" ? "fountain" : "json"}`;
+        a.click();
+      }
+    } catch (err) {
+      console.error("Export error:", err);
     }
   }
 
   function insertAtCursor(text: string) {
-    if (editorRef.current) {
-      const position = editorRef.current.getPosition();
-      editorRef.current.executeEdits("toolbar", [{
-        range: new monaco!.Range(
-          position.lineNumber, position.column,
-          position.lineNumber, position.column
-        ),
-        text, forceMoveMarkers: true,
-      }]);
-      editorRef.current.focus();
-    } else {
-      setScriptText((prev) => prev + "\n" + text);
-    }
+    const newText = scriptText + "\n" + text;
+    saveScript(newText);
   }
-
-  const VIEW_MODES: { id: ViewMode; icon: React.ReactNode; label: string }[] = [
-    { id: "editor", icon: <FileTextIcon className="w-3.5 h-3.5" />, label: "Editor" },
-    { id: "split", icon: <ColumnsIcon className="w-3.5 h-3.5" />, label: "Split" },
-    { id: "preview", icon: <EyeIcon className="w-3.5 h-3.5" />, label: "Vista" },
-  ];
 
   const EXPORT_OPTS = [
     { label: "PDF Producción", format: "pdf", emoji: "📄" },
     { label: ".Fountain", format: "fountain", emoji: "🎬" },
     { label: ".JSON", format: "json", emoji: "📋" },
   ];
+
+  if (!mounted || !loaded) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background text-foreground">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-muted border-t-foreground rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-sm text-muted-foreground">Cargando editor...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
@@ -823,34 +873,6 @@ export default function EditorPage() {
 
           {/* Right */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* Save state */}
-            <span className={`text-[11px] uppercase tracking-wider font-semibold transition-all hidden sm:block ${
-              saveState === "saving" ? "text-amber-500" :
-              saveState === "saved" ? "text-green-500" :
-              saveState === "error" ? "text-red-500" : "text-transparent"
-            }`}>
-              {saveState === "saving" ? "Sync..." : saveState === "saved" ? "✓" : saveState === "error" ? "Error" : "·"}
-            </span>
-
-            {/* View mode toggle */}
-            <div className="flex items-center bg-muted rounded-md p-0.5 border border-border">
-              {VIEW_MODES.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setViewMode(m.id)}
-                  title={m.label}
-                  className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                    viewMode === m.id
-                      ? "bg-card text-foreground shadow-sm border border-border"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {m.icon}
-                  <span className="hidden lg:inline">{m.label}</span>
-                </button>
-              ))}
-            </div>
-
             <ThemeToggle />
 
             <button
@@ -867,7 +889,7 @@ export default function EditorPage() {
               🎯 Tablero
             </Link>
 
-            {/* Export dropdown — click-based, no gap */}
+            {/* Export dropdown */}
             <div ref={exportMenuRef} className="relative">
               <button
                 onClick={() => setShowExportMenu((v) => !v)}
@@ -898,89 +920,54 @@ export default function EditorPage() {
       </header>
 
       {/* ── Main Content ── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── Editor pane ── */}
-        {(viewMode === "editor" || viewMode === "split") && (
-          <div
-            className={`flex flex-col overflow-hidden ${viewMode === "split" ? "w-1/2 border-r border-border" : "flex-1"}`}
-          >
-            <div className="flex-1 overflow-hidden bg-background relative">
-              {monacoTheme && (
-                <Editor
-                  height="100%"
-                  language="fountain"
-                  theme={monacoTheme}
-                  value={scriptText}
-                  onChange={handleChange}
-                  onMount={handleEditorDidMount}
-                  options={{
-                    minimap: { enabled: false },
-                    wordWrap: "on",
-                    fontFamily: '"Courier Prime", "Monaco", "Courier New", monospace',
-                    fontSize: 13,
-                    lineHeight: 22,
-                    padding: { top: 24, bottom: 24 },
-                    scrollBeyondLastLine: false,
-                    renderLineHighlight: "gutter",
-                    lineNumbers: "on",
-                    scrollbar: { verticalScrollbarSize: 5, horizontalScrollbarSize: 5 },
-                    overviewRulerLanes: 0,
-                  }}
-                />
-              )}
-            </div>
+      <div className="flex flex-col flex-1 overflow-hidden">
+        {/* Fountain Editor with inline blocks */}
+        <div className="flex-1 overflow-hidden">
+          <FountainEditor blocks={blocks} onBlockChange={handleBlockChange} isDark={isDark} />
+        </div>
 
-            {/* ── Generación Asistida ── */}
-            <div className="border-t border-border p-3 bg-muted/20 z-20">
-              <button
-                onClick={() => setShowTranscriptionPanel(!showTranscriptionPanel)}
-                className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2"
-              >
-                <span>{showTranscriptionPanel ? "▼" : "▶"}</span> Generación Asistida
-              </button>
-              {showTranscriptionPanel && (
-                <div className="mt-3 space-y-2 animate-fade-in">
-                  <textarea
-                    value={transcription}
-                    onChange={(e) => setTranscription(e.target.value)}
-                    placeholder="Introduce notas, resumen o transcripción... La IA estructurará el guion en Fountain."
-                    rows={3}
-                    className="w-full bg-background text-foreground text-xs rounded-md px-3 py-2 border border-border focus:outline-none focus:ring-1 focus:ring-ring resize-none font-mono"
-                  />
-                  <button
-                    onClick={handleGenerate}
-                    disabled={isGenerating || !transcription.trim()}
-                    className="bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-xs font-medium px-4 py-1.5 rounded-md transition-all"
-                  >
-                    {isGenerating ? "Procesando..." : "Construir Secuencia"}
-                  </button>
+        {/* ── Generación Asistida ── */}
+        <div className="border-t border-border p-3 bg-muted/20 z-20 flex-shrink-0">
+          <button
+            onClick={() => setShowTranscriptionPanel(!showTranscriptionPanel)}
+            className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2"
+          >
+            <span>{showTranscriptionPanel ? "▼" : "▶"}</span> Generación Asistida
+          </button>
+          {showTranscriptionPanel && (
+            <div className="mt-3 space-y-2 animate-fade-in">
+              {generateError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs p-2 rounded-md">
+                  {generateError}
                 </div>
               )}
+              <textarea
+                value={transcription}
+                onChange={(e) => setTranscription(e.target.value)}
+                placeholder="Introduce notas, resumen o transcripción... La IA estructurará el guion en Fountain."
+                rows={3}
+                className="w-full bg-background text-foreground text-xs rounded-md px-3 py-2 border border-border focus:outline-none focus:ring-1 focus:ring-ring resize-none font-mono"
+              />
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating || !transcription.trim()}
+                className="bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-xs font-medium px-4 py-1.5 rounded-md transition-all"
+              >
+                {isGenerating ? "Procesando..." : "Construir Secuencia"}
+              </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
 
-        {/* ── Preview pane ── */}
-        {(viewMode === "preview" || viewMode === "split") && (
-          <div className={`flex flex-col overflow-hidden ${viewMode === "split" ? "w-1/2" : "flex-1"}`}>
-            {/* Preview header */}
-            <div className="flex items-center justify-between px-4 h-9 border-b border-border bg-muted/20 shrink-0">
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Vista Previa · Fountain
-              </span>
-              <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
-                <span>{pages} pág</span>
-                <span>{sluglines} esc.</span>
-                <span>{words} palabras</span>
-              </div>
-            </div>
-
-            {/* Fountain preview */}
-            <div className="flex-1 overflow-hidden">
-              <FountainPreview text={scriptText} isDark={isDark} />
-            </div>
-          </div>
-        )}
+      {/* Stats bar */}
+      <div className="flex items-center justify-between px-4 h-9 border-t border-border bg-muted/20 text-[10px] text-muted-foreground font-mono shrink-0">
+        <span className="font-semibold uppercase tracking-widest">Vista Previa · Fountain</span>
+        <div className="flex items-center gap-3">
+          <span>{pages} pág</span>
+          <span>{sluglines} esc.</span>
+          <span>{words} palabras</span>
+        </div>
       </div>
 
       {/* ── Feedback panel ── */}
@@ -998,31 +985,65 @@ export default function EditorPage() {
               </div>
             ) : feedback ? (
               <>
-                <div className="bg-muted/50 border border-border rounded-xl p-6 text-center">
-                  <div className="text-5xl font-bold font-mono">{feedback.totalScore}</div>
-                  <div className="text-muted-foreground text-xs font-semibold uppercase tracking-widest mt-2">Score Crítico</div>
-                  <div className={`text-xs font-bold uppercase tracking-widest mt-4 px-3 py-1.5 rounded-md inline-block ${
-                    feedback.status === "Listo para enviar" ? "bg-green-500/10 text-green-600 dark:text-green-400" :
-                    feedback.status === "Necesita revisión menor" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" :
-                    "bg-red-500/10 text-red-600 dark:text-red-400"
-                  }`}>
-                    {feedback.status}
+                {feedback.error ? (
+                  <div className="bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs p-3 rounded-md">
+                    {feedback.error}
                   </div>
-                </div>
-                {feedback.scores && (
-                  <div className="space-y-4">
-                    <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest border-b border-border pb-2">Dimensiones</h3>
-                    {Object.entries(feedback.scores).map(([dim, score]: [string, any]) => (
-                      <div key={dim} className="flex items-center gap-3">
-                        <span className="text-[11px] font-semibold text-muted-foreground w-24 capitalize truncate">{dim}</span>
-                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full transition-all ${score.passing ? "bg-foreground" : "bg-red-500"}`}
-                            style={{ width: `${(score.score / 5) * 100}%` }} />
+                ) : (
+                  <>
+                    <div className="bg-muted/50 border border-border rounded-xl p-6 text-center">
+                      <div className="text-5xl font-bold font-mono">{feedback.totalScore || "—"}</div>
+                      <div className="text-muted-foreground text-xs font-semibold uppercase tracking-widest mt-2">Score Crítico</div>
+                      {feedback.status && (
+                        <div className={`text-xs font-bold uppercase tracking-widest mt-4 px-3 py-1.5 rounded-md inline-block ${
+                          feedback.status === "Listo para enviar" ? "bg-green-500/10 text-green-600 dark:text-green-400" :
+                          feedback.status === "Necesita revisión menor" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" :
+                          "bg-red-500/10 text-red-600 dark:text-red-400"
+                        }`}>
+                          {feedback.status}
                         </div>
-                        <span className="text-[11px] font-mono font-bold w-8 text-right">{score.score}/5</span>
+                      )}
+                    </div>
+                    {feedback.scores && (
+                      <div className="space-y-4">
+                        <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest border-b border-border pb-2">Dimensiones</h3>
+                        {Object.entries(feedback.scores).map(([dim, score]: [string, any]) => (
+                          <div key={dim} className="flex items-center gap-3">
+                            <span className="text-[11px] font-semibold text-muted-foreground w-24 capitalize truncate">{dim}</span>
+                            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full transition-all ${score.passing ? "bg-foreground" : "bg-red-500"}`}
+                                style={{ width: `${(score.score / 5) * 100}%` }} />
+                            </div>
+                            <span className="text-[11px] font-mono font-bold w-8 text-right">{score.score}/5</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    )}
+                    {feedback.recommendations && feedback.recommendations.length > 0 && (
+                      <div className="space-y-3 border-t border-border pt-4">
+                        <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Recomendaciones</h3>
+                        {feedback.recommendations.map((rec: any, idx: number) => (
+                          <div key={idx} className="text-xs text-foreground bg-muted/30 p-2 rounded-md border border-border">
+                            {rec.priority && <span className="inline-block mb-1 px-2 py-0.5 text-[9px] rounded font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 mr-2">{rec.priority}</span>}
+                            {rec.text || rec.message || rec}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {feedback.checklist && feedback.checklist.length > 0 && (
+                      <div className="space-y-2 border-t border-border pt-4">
+                        <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Checklist</h3>
+                        {feedback.checklist.map((item: any, idx: number) => (
+                          <div key={idx} className="flex items-center gap-2 text-xs text-foreground">
+                            <span className={`text-sm ${item.completed || item.passed ? "text-green-500" : "text-red-500"}`}>
+                              {item.completed || item.passed ? "✓" : "✗"}
+                            </span>
+                            {item.text || item.label || item}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             ) : null}
