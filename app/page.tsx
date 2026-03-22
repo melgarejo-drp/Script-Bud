@@ -4,52 +4,51 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { signIn } from "next-auth/react";
 import {
   ArrowRightIcon, SparklesIcon, FilmIcon, LayersIcon,
-  StarIcon, ZapIcon, BarChart3Icon, DownloadIcon,
+  StarIcon, ZapIcon, DownloadIcon,
 } from "lucide-react";
 
 const FEATURES = [
   {
     icon: <SparklesIcon className="w-5 h-5" />,
-    title: "Estructura Fractal 27-Bits",
-    desc: "El motor de IA genera guiones usando una arquitectura narrativa de 3 actos → 9 escenas → 27 beats. No templates genéricos.",
+    title: "Tu historia, estructurada en minutos",
+    desc: "Pega tu idea, un borrador o una transcripción. La IA la convierte en un guion con 27 escenas ordenadas, listas para filmar. Sin horas de outline.",
     accent: "from-violet-500/20 to-transparent",
     border: "border-violet-500/30",
   },
   {
     icon: <FilmIcon className="w-5 h-5" />,
-    title: "Editor Fountain Nativo",
-    desc: "Monaco Editor configurado con Fountain como primer lenguaje. Syntax highlighting, autocompletado y exportación PDF lista para producción.",
+    title: "Escribe como los profesionales",
+    desc: "Editor con formato de guion cinematográfico real. Las escenas, los diálogos y las acotaciones se formatean solos mientras escribes.",
     accent: "from-blue-500/20 to-transparent",
     border: "border-blue-500/30",
   },
   {
     icon: <LayersIcon className="w-5 h-5" />,
-    title: "Tablero Visual de Beats",
-    desc: "Kanban arrastrable organizado por actos y escenas. Reordena, edita y visualiza la arquitectura narrativa en una sola pantalla.",
+    title: "Ve tu historia de un vistazo",
+    desc: "Tablero visual con todas las escenas organizadas por acto. Mueve, reordena y reorganiza tu historia arrastrando tarjetas, sin tocar el texto.",
     accent: "from-emerald-500/20 to-transparent",
     border: "border-emerald-500/30",
   },
   {
     icon: <StarIcon className="w-5 h-5" />,
-    title: "Evaluación Automática",
-    desc: "Análisis objetivo del guion contra 25 checkpoints narrativos. Score por dimensión: estructura, diálogo, tensión y arco de personaje.",
+    title: "¿Funciona tu guion? La IA te lo dice",
+    desc: "Recibe un análisis honesto de tu historia: qué escenas tienen tensión, dónde se pierde el ritmo y qué personajes necesitan más desarrollo.",
     accent: "from-amber-500/20 to-transparent",
     border: "border-amber-500/30",
   },
   {
     icon: <ZapIcon className="w-5 h-5" />,
-    title: "Sync con Notion",
-    desc: "Cada cambio en el editor se sincroniza automáticamente con tu base de datos Notion. Acceso desde cualquier dispositivo.",
+    title: "Todo guardado, siempre disponible",
+    desc: "Tu guion se sincroniza automáticamente con Notion. Abre desde tu laptop, tablet o teléfono. Nunca pierdas un cambio.",
     accent: "from-pink-500/20 to-transparent",
     border: "border-pink-500/30",
   },
   {
     icon: <DownloadIcon className="w-5 h-5" />,
-    title: "Exportación Profesional",
-    desc: "PDF con portada, Fountain puro, JSON estructurado o Markdown. Formato listo para enviar a producción o festivales.",
+    title: "Listo para producción o festival",
+    desc: "Exporta tu guion como PDF con portada, en formato Fountain o como archivo de texto. Listo para imprimir, enviar o presentar.",
     accent: "from-cyan-500/20 to-transparent",
     border: "border-cyan-500/30",
   },
@@ -110,13 +109,13 @@ export default function LandingPage() {
           <div className="flex items-center gap-4">
             <ThemeToggle />
             <button
-              onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+              onClick={() => window.location.href = "/dashboard"}
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
               Iniciar Sesión
             </button>
             <button
-              onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+              onClick={() => window.location.href = "/dashboard"}
               className="bg-foreground text-background hover:bg-foreground/90 text-sm font-medium px-4 py-2 rounded-md transition-all"
             >
               Comenzar gratis
@@ -176,7 +175,7 @@ export default function LandingPage() {
             className="flex flex-col sm:flex-row items-center justify-center gap-3"
           >
             <button
-              onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+              onClick={() => window.location.href = "/dashboard"}
               className="group bg-foreground text-background hover:bg-foreground/90 font-semibold px-8 py-3.5 rounded-lg transition-all active:scale-95 flex items-center gap-2"
             >
               Abrir mi Lienzo
@@ -433,7 +432,7 @@ export default function LandingPage() {
             <p className="text-background/60 text-lg">Tu próximo guion empieza con una idea, no con horas de setup.</p>
           </div>
           <button
-            onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+            onClick={() => window.location.href = "/dashboard"}
             className="shrink-0 bg-background text-foreground hover:bg-background/90 font-semibold px-8 py-4 rounded-xl transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap"
           >
             Iniciar Aplicación
