@@ -76,6 +76,8 @@ export default function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  // Ref map for outside-click detection per menu
+  const menuRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   const [form, setForm] = useState({
     title: "",
@@ -92,12 +94,18 @@ export default function DashboardPage() {
     fetchProjects();
   }, []);
 
-  // Close menu when clicking outside
+  // Close menu when clicking outside — uses pointerdown + ref check to avoid
+  // React 17+ root-delegation race that breaks stopPropagation on document listeners
   useEffect(() => {
-    const handler = () => setOpenMenuId(null);
-    document.addEventListener("click", handler);
-    return () => document.removeEventListener("click", handler);
-  }, []);
+    const handler = (e: PointerEvent) => {
+      if (!openMenuId) return;
+      const menuEl = menuRefs.current.get(openMenuId);
+      if (menuEl && menuEl.contains(e.target as Node)) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [openMenuId]);
 
   async function fetchProjects() {
     try {
@@ -346,71 +354,80 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 ) : (
-                  /* Normal card */
-                  <Link
-                    href={`/dashboard/${project.id}/editor`}
-                    className="block border border-border bg-card rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-foreground/30 transition-all h-[200px] flex flex-col"
-                  >
-                    <div className="h-20 bg-muted flex items-center justify-center border-b border-border relative">
-                      <span className="text-2xl opacity-80 group-hover:scale-110 transition-transform">
-                        {GENRE_EMOJIS[project.genre]}
-                      </span>
-                      {/* Context menu button */}
+                  /* Normal card — Link wraps ONLY the content area, not the menu button */
+                  <div className="relative border border-border bg-card rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-foreground/30 transition-all h-[200px] flex flex-col">
+                    {/* Clickable area → navigate */}
+                    <Link
+                      href={`/dashboard/${project.id}/editor`}
+                      className="flex flex-col flex-1 min-h-0"
+                    >
+                      <div className="h-20 bg-muted flex items-center justify-center border-b border-border">
+                        <span className="text-2xl opacity-80 group-hover:scale-110 transition-transform">
+                          {GENRE_EMOJIS[project.genre]}
+                        </span>
+                      </div>
+                      <div className="p-4 flex flex-col flex-1 justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="font-medium text-sm text-foreground truncate">{project.title}</h3>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ml-1 shrink-0 ${STATUS_COLORS[project.status]}`}>
+                              {project.status}
+                            </span>
+                          </div>
+                          {project.logline && (
+                            <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2 mb-1">
+                              {project.logline}
+                            </p>
+                          )}
+                          <p className="text-muted-foreground text-xs">{project.genre} · {project.duration}m</p>
+                        </div>
+                        <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+                          <span>{timeAgo(project.lastModified)}</span>
+                          <span className="font-mono bg-muted px-1 rounded border border-border">.fountain</span>
+                        </div>
+                      </div>
+                    </Link>
+
+                    {/* ⋮ Menu — outside Link, no gap between button and dropdown */}
+                    <div
+                      ref={(el) => { menuRefs.current.set(project.id, el); }}
+                      className="absolute top-2 right-2 z-20"
+                    >
                       <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setOpenMenuId(openMenuId === project.id ? null : project.id);
-                        }}
-                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 rounded-md bg-background/80 hover:bg-background border border-border transition-all"
+                        onClick={() => setOpenMenuId(openMenuId === project.id ? null : project.id)}
+                        className={`p-1.5 rounded-md border transition-all ${
+                          openMenuId === project.id
+                            ? "opacity-100 bg-background border-border"
+                            : "opacity-0 group-hover:opacity-100 bg-background/80 border-border hover:bg-background"
+                        }`}
+                        aria-label="Opciones del proyecto"
                       >
                         <MoreVerticalIcon className="w-3.5 h-3.5 text-muted-foreground" />
                       </button>
-                    </div>
-                    <div className="p-4 flex flex-col flex-1 justify-between">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <h3 className="font-medium text-sm text-foreground truncate">{project.title}</h3>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ml-1 shrink-0 ${STATUS_COLORS[project.status]}`}>
-                            {project.status}
-                          </span>
-                        </div>
-                        {project.logline && (
-                          <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2 mb-1">
-                            {project.logline}
-                          </p>
-                        )}
-                        <p className="text-muted-foreground text-xs">{project.genre} · {project.duration}m</p>
-                      </div>
-                      <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-                        <span>{timeAgo(project.lastModified)}</span>
-                        <span className="font-mono bg-muted px-1 rounded border border-border">.fountain</span>
-                      </div>
-                    </div>
-                  </Link>
-                )}
 
-                {/* Context menu dropdown */}
-                {openMenuId === project.id && (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    className="absolute top-12 right-2 z-20 bg-card border border-border rounded-lg shadow-lg py-1 w-40 animate-fade-in"
-                  >
-                    <button
-                      onClick={() => handleRename(project.id, project.title)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    >
-                      <PencilIcon className="w-3.5 h-3.5 text-muted-foreground" />
-                      Renombrar
-                    </button>
-                    <div className="border-t border-border my-1" />
-                    <button
-                      onClick={() => handleDelete(project.id)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                      <TrashIcon className="w-3.5 h-3.5" />
-                      Eliminar
-                    </button>
+                      {/* Dropdown — top-full = pegado al botón, cero gap */}
+                      {openMenuId === project.id && (
+                        <div className="absolute top-full right-0 mt-1 bg-card border border-border rounded-lg shadow-xl py-1 w-44 animate-fade-in">
+                          <button
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => { handleRename(project.id, project.title); setOpenMenuId(null); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                          >
+                            <PencilIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            Renombrar
+                          </button>
+                          <div className="border-t border-border my-1" />
+                          <button
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => { handleDelete(project.id); setOpenMenuId(null); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                          >
+                            <TrashIcon className="w-3.5 h-3.5 shrink-0" />
+                            Eliminar
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
