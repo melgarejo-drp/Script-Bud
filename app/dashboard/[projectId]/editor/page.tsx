@@ -444,6 +444,7 @@ export default function EditorPage() {
   const monaco = useMonaco();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
+  const [mounted, setMounted] = useState(false);
 
   const [scriptText, setScriptText] = useState(EXAMPLE_SCRIPT);
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -460,6 +461,9 @@ export default function EditorPage() {
   const lastSaved = useRef<string>(scriptText);
   const saveTimeout = useRef<NodeJS.Timeout | null>(null);
   const editorRef = useRef<any>(null);
+
+  // Hydration guard — prevents theme flash on initial load
+  useEffect(() => { setMounted(true); }, []);
 
   // Close export menu on outside click
   useEffect(() => {
@@ -546,7 +550,8 @@ export default function EditorPage() {
     });
   }, [monaco]);
 
-  const monacoTheme = isDark ? "fountain-dark" : "fountain-light";
+  // Use "vs-dark" as safe default until hydration resolves, avoiding theme flash
+  const monacoTheme = !mounted ? "vs-dark" : (isDark ? "fountain-dark" : "fountain-light");
 
   const handleEditorDidMount = (editor: any) => {
     editorRef.current = editor;
@@ -637,18 +642,105 @@ export default function EditorPage() {
       } catch (e) {
         console.warn("pdfMake VFS:", e);
       }
+      // Configure Courier as standard PDF built-in font for screenplay format
+      try {
+        (pdfMake as any).fonts = {
+          Courier: {
+            normal: "Courier",
+            bold: "Courier-Bold",
+            italics: "Courier-Oblique",
+            bolditalics: "Courier-BoldOblique",
+          },
+          Roboto: {
+            normal: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/fonts/Roboto/Roboto-Regular.ttf",
+            bold: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/fonts/Roboto/Roboto-Medium.ttf",
+            italics: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/fonts/Roboto/Roboto-Italic.ttf",
+            bolditalics: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/fonts/Roboto/Roboto-MediumItalic.ttf",
+          },
+        };
+      } catch (e) { console.warn("pdfmake font config:", e); }
+
+      // Parse fountain tokens → proper screenplay PDF blocks
+      // Page layout: Letter 8.5×11", margins: 1.5" left, 1" top/right/bottom
+      // In pdfmake points (72pt = 1"): left=108, top=72, right=72, bottom=72
+      const pdfTokens = parseFountain(scriptText);
+      const pdfContent: any[] = [];
+
+      // ── Title page ──
+      pdfContent.push(
+        { text: "\n\n\n\n\n\n\n\n", font: "Courier", fontSize: 12 },
+        { text: "GUION", font: "Courier", fontSize: 14, bold: true, alignment: "center", margin: [0, 0, 0, 12] },
+        { text: "Escrito con Script Bud", font: "Courier", fontSize: 12, alignment: "center" },
+        { text: "", pageBreak: "before" as const }
+      );
+
+      // ── Script body ──
+      for (const token of pdfTokens) {
+        switch (token.type) {
+          case "blank":
+            pdfContent.push({ text: " ", font: "Courier", fontSize: 12, lineHeight: 1 });
+            break;
+          case "scene-heading":
+            pdfContent.push({
+              text: token.text.toUpperCase(),
+              font: "Courier", fontSize: 12, bold: true,
+              margin: [0, 12, 0, 0],
+            });
+            break;
+          case "action":
+            pdfContent.push({ text: token.text, font: "Courier", fontSize: 12 });
+            break;
+          case "character":
+            pdfContent.push({
+              text: token.text.toUpperCase(),
+              font: "Courier", fontSize: 12, bold: true,
+              margin: [216, 12, 0, 0], // ~3" from content left ≈ character position
+            });
+            break;
+          case "parenthetical":
+            pdfContent.push({
+              text: token.text,
+              font: "Courier", fontSize: 12, italics: true,
+              margin: [162, 0, 108, 0], // slightly narrower than dialogue
+            });
+            break;
+          case "dialogue":
+            pdfContent.push({
+              text: token.text,
+              font: "Courier", fontSize: 12,
+              margin: [108, 0, 108, 0], // ~1.5" indent each side within content
+            });
+            break;
+          case "transition":
+            pdfContent.push({
+              text: token.text.toUpperCase(),
+              font: "Courier", fontSize: 12, bold: true,
+              alignment: "right",
+              margin: [0, 12, 0, 0],
+            });
+            break;
+          case "centered":
+            pdfContent.push({ text: token.text, font: "Courier", fontSize: 12, alignment: "center" });
+            break;
+          case "page-break":
+            pdfContent.push({ text: "", pageBreak: "before" as const });
+            break;
+          case "lyric":
+            pdfContent.push({ text: `~${token.text}`, font: "Courier", fontSize: 12, italics: true });
+            break;
+          case "title-page":
+          case "note":
+            break; // skip in body
+        }
+      }
+
       const docDefinition = {
-        content: [
-          { text: "\n\n\n\n\n\n\n\n\n\n\n" },
-          { text: "MI PROYECTO", fontSize: 24, bold: true, alignment: "center", margin: [0, 0, 0, 20] },
-          { text: "Escrito por\nScript Bud", fontSize: 12, alignment: "center", margin: [0, 0, 0, 40] },
-          { text: "", pageBreak: "before" as const },
-          { text: scriptText, preserveLeadingSpaces: true, style: "scriptBody" }
-        ],
-        styles: { scriptBody: { fontSize: 12, lineHeight: 1.2, margin: [40, 40, 40, 40] } },
-        defaultStyle: { font: "Roboto" }
+        pageSize: "LETTER" as const,
+        pageMargins: [108, 72, 72, 72] as [number, number, number, number],
+        content: pdfContent,
+        defaultStyle: { font: "Courier", fontSize: 12, lineHeight: 1 },
       };
-      pdfMake.createPdf(docDefinition as any).download("guion_con_portada.pdf");
+      pdfMake.createPdf(docDefinition as any).download("guion.pdf");
       return;
     }
     const res = await fetch("/api/guion/export", {

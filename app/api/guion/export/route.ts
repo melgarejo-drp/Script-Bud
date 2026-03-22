@@ -18,10 +18,12 @@ export async function POST(request: NextRequest) {
 
     switch (format) {
       case "fountain": {
-        if (!guionJSON) {
-          return NextResponse.json({ error: "guionJSON required for fountain export" }, { status: 400 });
+        // If the editor sends raw fountain text, return it directly (it already IS .fountain)
+        // If structured guionJSON is provided, convert it
+        if (!guionJSON && !guionText) {
+          return NextResponse.json({ error: "guionJSON or guionText required for fountain export" }, { status: 400 });
         }
-        const fountainText = generateFountainText(guionJSON);
+        const fountainText = guionText || generateFountainText(guionJSON!);
         return new NextResponse(fountainText, {
           headers: {
             "Content-Type": "text/plain; charset=utf-8",
@@ -31,10 +33,9 @@ export async function POST(request: NextRequest) {
       }
 
       case "json": {
-        if (!guionJSON) {
-          return NextResponse.json({ error: "guionJSON required for JSON export" }, { status: 400 });
-        }
-        return new NextResponse(JSON.stringify(guionJSON, null, 2), {
+        // Wrap plain text as JSON if no structured guionJSON provided
+        const exportData = guionJSON || { guionText, title, exportedAt: new Date().toISOString() };
+        return new NextResponse(JSON.stringify(exportData, null, 2), {
           headers: {
             "Content-Type": "application/json",
             "Content-Disposition": `attachment; filename="${filename}.json"`,

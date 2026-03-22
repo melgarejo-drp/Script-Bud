@@ -180,15 +180,60 @@
 .beat-transition { border-left: 4px solid var(--beat-transition); }
 .beat-turning   { border-left: 4px solid var(--beat-turning); }
 
-/* ─── Glass morphism (Subtle) ────────────────────── */
+/* ─── Glass morphism ────────────────────────────────── */
 .glass {
   background: var(--background);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
 }
-.glass-panel {
-  background: rgba(var(--background), 0.85); /* fallback */
+.glass-card {
+  background: rgba(9, 9, 11, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+:root .glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Grain texture overlay (cinematic) ─────────────── */
+/* Applied as a ::before pseudo-element on a container */
+.app-grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 180px 180px;
+  opacity: 0.025;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ─── App-level radial glow (dark mode) ─────────────── */
+.app-glow::after {
+  content: "";
+  position: fixed;
+  top: -40%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120%;
+  height: 70%;
+  background: radial-gradient(ellipse at center, rgba(120, 80, 255, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+:root .app-glow::after { opacity: 0; }
+
+/* ─── Grid background (subtle) ──────────────────────── */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, var(--border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: -1px -1px;
 }
 
 /* ─── Screenplay editor ─────────────────────────────── */
@@ -199,11 +244,38 @@
   letter-spacing: 0.02em;
 }
 
-/* ─── Gradient backgrounds (Clean) ──────────────────── */
+/* ─── Gradient backgrounds ───────────────────────────── */
 .gradient-hero {
   background: radial-gradient(
     ellipse at 50% -20%,
     var(--muted) 0%,
     transparent 70%
   );
+}
+
+/* ─── Responsive helpers ─────────────────────────────── */
+@media (max-width: 768px) {
+  .mobile-hidden { display: none !important; }
+  .mobile-full { width: 100% !important; }
+}
+
+/* ─── Smooth interactive cards ───────────────────────── */
+.card-hover {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+.dark .card-hover:hover {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* ─── Toolbar glow accent ────────────────────────────── */
+.toolbar-accent {
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+.dark .toolbar-accent {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
 }

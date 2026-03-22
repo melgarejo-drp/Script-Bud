@@ -29,7 +29,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es" className={inter.variable} suppressHydrationWarning>
-      <body className="bg-background text-foreground antialiased min-h-screen" suppressHydrationWarning>
+      <body className="bg-background text-foreground antialiased min-h-screen app-grain app-glow" suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
